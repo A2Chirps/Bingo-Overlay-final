@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bingo Overlay</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Nunito:wght@700;900&display=swap" rel="stylesheet">
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: transparent;
+    width: 100vw;
+    height: 100vh;
+    display: flex;
+    align-items: flex-end;
+    justify-content: flex-end;
+    font-family: 'Nunito', sans-serif;
+    overflow: hidden;
+  }
+
+  #bingo-wrap {
+    position: relative;
+    margin: 18px;
+    width: 310px;
+  }
+
+  .bingo-header {
+    background: #6441a5;
+    border-radius: 10px 10px 0 0;
+    text-align: center;
+    padding: 7px 0 5px;
+    letter-spacing: 12px;
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 26px;
+    color: #fff;
+    text-indent: 12px;
+    border: 2px solid #a970ff;
+    border-bottom: none;
+  }
+
+  .bingo-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    border: 2px solid #a970ff;
+    border-top: none;
+    border-radius: 0 0 10px 10px;
+    overflow: hidden;
+    background: rgba(20, 10, 40, 0.82);
+  }
+
+  .cell {
+    border: 1px solid rgba(169, 112, 255, 0.3);
+    min-height: 68px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 5px 4px;
+    font-size: 11px;
+    font-weight: 700;
+    color: #e8d5ff;
+    line-height: 1.2;
+    position: relative;
+    transition: background 0.3s;
+    cursor: default;
+    user-select: none;
+  }
+
+  .cell.marked {
+    background: rgba(100, 65, 165, 0.55);
+    color: #fff;
+  }
+
+  .cell.marked::after {
+    content: '';
+    position: absolute;
+    inset: 6px;
+    border-radius: 50%;
+    border: 2.5px solid #a970ff;
+    background: rgba(169, 112, 255, 0.18);
+    pointer-events: none;
+  }
+
+  #bingo-announce {
+    display: none;
+    position: absolute;
+    inset: 0;
+    z-index: 20;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    background: rgba(10, 5, 25, 0.7);
+    border-radius: 0 0 10px 10px;
+    animation: popIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  }
+
+  #bingo-announce.show {
+    display: flex;
+  }
+
+  @keyframes popIn {
+    from { transform: scale(0.5); opacity: 0; }
+    to   { transform: scale(1);   opacity: 1; }
+  }
+
+  .bingo-word {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 72px;
+    color: #a970ff;
+    letter-spacing: 8px;
+    text-shadow: 0 0 30px rgba(169,112,255,0.6);
+    line-height: 1;
+  }
+
+  .bingo-sub {
+    font-size: 13px;
+    font-weight: 900;
+    color: #e8d5ff;
+    letter-spacing: 3px;
+    margin-top: 4px;
+  }
+
+  .win-line-svg {
+    position: absolute;
+    top: 38px;
+    left: 0;
+    width: 310px;
+    height: 280px;
+    pointer-events: none;
+    z-index: 15;
+  }
+
+  .win-stroke {
+    stroke: #a970ff;
+    stroke-width: 4;
+    stroke-linecap: round;
+    opacity: 0;
+    transition: opacity 0.5s;
+    fill: none;
+  }
+
+  .win-stroke.show {
+    opacity: 1;
+    animation: drawLine 0.5s ease both;
+  }
+
+  @keyframes drawLine {
+    from { stroke-dashoffset: 400; stroke-dasharray: 400; }
+    to   { stroke-dashoffset: 0;   stroke-dasharray: 400; }
+  }
+</style>
+</head>
+<body>
+
+<div id="bingo-wrap">
+  <div class="bingo-header">BINGO</div>
+  <div class="bingo-grid" id="grid"></div>
+  <svg class="win-line-svg" id="win-svg" viewBox="0 0 310 280" xmlns="http://www.w3.org/2000/svg"></svg>
+  <div id="bingo-announce">
+    <div class="bingo-word">BINGO!</div>
+    <div class="bingo-sub">we have a winner</div>
+  </div>
+</div>
+
+<script>
+const firebaseConfig = {
+  apiKey: "AIzaSyDodsJ7VzlkvonyccCAD1faOFMdiIlVT4A",
+  authDomain: "overlay-b7bb4.firebaseapp.com",
+  databaseURL: "https://overlay-b7bb4-default-rtdb.firebaseio.com",
+  projectId: "overlay-b7bb4",
+  storageBucket: "overlay-b7bb4.firebasestorage.app",
+  messagingSenderId: "894398873951",
+  appId: "1:894398873951:web:072b815e53a758ccc1b6ea"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+const DEFAULT_SQUARES = [
+  "Said 'chat'", "Took a sip", "Checked phone", "Laughed at own joke",
+  "Said 'Fort Lauderdale'", "Made a face", "Forgot what they were saying", "Someone in chat donated",
+  "Said 'let's go'", "Awkward silence", "Read chat out loud", "Called someone 'bro'",
+  "Mentioned the weather", "Used a sound effect", "Did a voice", "Chat spammed emotes"
+];
+
+const LINES = [
+  [0,1,2,3],[4,5,6,7],[8,9,10,11],[12,13,14,15],
+  [0,4,8,12],[1,5,9,13],[2,6,10,14],[3,7,11,15],
+  [0,5,10,15],[3,6,9,12]
+];
+
+let SQUARES = [...DEFAULT_SQUARES];
+let marked = new Array(16).fill(false);
+let completedLines = new Set();
+const cellEls = [];
+
+function cellCenter(idx) {
+  const col = idx % 4;
+  const row = Math.floor(idx / 4);
+  const cw = 310 / 4;
+  const ch = 280 / 4;
+  return { x: col * cw + cw / 2, y: row * ch + ch / 2 };
+}
+
+function checkLines() {
+  const svg = document.getElementById('win-svg');
+  let newBingo = false;
+  LINES.forEach((line, li) => {
+    if (completedLines.has(li)) return;
+    if (line.every(i => marked[i])) {
+      completedLines.add(li);
+      newBingo = true;
+      const a = cellCenter(line[0]);
+      const b = cellCenter(line[line.length - 1]);
+      const stroke = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      stroke.setAttribute('x1', a.x); stroke.setAttribute('y1', a.y);
+      stroke.setAttribute('x2', b.x); stroke.setAttribute('y2', b.y);
+      stroke.setAttribute('class', 'win-stroke');
+      svg.appendChild(stroke);
+      requestAnimationFrame(() => stroke.classList.add('show'));
+    }
+  });
+  if (newBingo) {
+    const ann = document.getElementById('bingo-announce');
+    ann.classList.add('show');
+    setTimeout(() => ann.classList.remove('show'), 3500);
+  }
+}
+
+function applyState(data) {
+  if (data.squares && data.squares.length === 16) {
+    SQUARES = data.squares;
+    cellEls.forEach((el, i) => el.textContent = SQUARES[i]);
+  }
+  if (data.marked) {
+    marked = data.marked;
+    completedLines.clear();
+    document.getElementById('win-svg').innerHTML = '';
+    cellEls.forEach((el, i) => el.classList.toggle('marked', marked[i]));
+    checkLines();
+  }
+}
+
+function buildGrid() {
+  const grid = document.getElementById('grid');
+  SQUARES.forEach((txt, i) => {
+    const cell = document.createElement('div');
+    cell.className = 'cell';
+    cell.textContent = txt;
+    grid.appendChild(cell);
+    cellEls.push(cell);
+  });
+}
+
+buildGrid();
+
+db.ref('bingo').on('value', (snapshot) => {
+  const data = snapshot.val();
+  if (data) applyState(data);
+});
+</script>
+</body>
+</html>
